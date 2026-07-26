@@ -2,32 +2,77 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/shantanusingh/distributed-rate-limiter/internal/limiter"
 )
 
+// tenant is one customer: a name (used as the Redis bucket key) and its limiter.
+type tenant struct {
+	name    string
+	limiter limiter.Limiter
+}
+
+// getenv reads an environment variable, falling back to a default.
+func getenv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	ctx := context.Background()
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
+	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
+	port := getenv("PORT", "8080")
+	instance := getenv("INSTANCE_ID", "limiter-1")
+
+	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		panic(err)
+		log.Fatalf("cannot reach redis at %s: %v", redisAddr, err)
 	}
 
-	fmt.Println("connected to the redis")
+	tenants := map[string]tenant{
+		"free-key": {name: "free", limiter: limiter.NewTokenBucket(rdb, 5, 1)},
+		"pro-key":  {name: "pro", limiter: limiter.NewTokenBucket(rdb, 100, 20)},
+	}
 
-	tb := limiter.NewTokenBucket(rdb, 5, 1)
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Served-By", instance) // which copy handled this
 
-	for i := 1; i <= 7; i++ {
-		d, err := tb.Check(ctx, "acme", 1)
-		if err != nil {
-			panic(err)
+		key := r.Header.Get("X-API-Key")
+		t, ok := tenants[key]
+		if !ok {
+			http.Error(w, "unknown or missing API key", http.StatusUnauthorized) // 401
+			return
 		}
-		fmt.Printf("request %d -> allowed = %v remaining = %.1f\n",
-			i, d.Allowed, d.Remaining)
+
+		d, err := t.limiter.Check(r.Context(), t.name, 1)
+		if err != nil {
+			http.Error(w, "limiter error", http.StatusInternalServerError) // 500
+			return
+		}
+
+		w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(d.Remaining, 'f', 1, 64))
+
+		if !d.Allowed {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests) // 429
+			return
+		}
+
+		w.WriteHeader(http.StatusOK) // 200
+		w.Write([]byte("ok\n"))
+	}
+
+	http.HandleFunc("/", handler)
+	log.Printf("[%s] listening on :%s (redis %s)", instance, port, redisAddr)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatal(err)
 	}
 }
