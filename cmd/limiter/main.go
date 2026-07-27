@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -37,6 +39,14 @@ func main() {
 		log.Fatalf("cannot reach redis at %s: %v", redisAddr, err)
 	}
 
+	// Build a reverse proxy pointed at the real backend we protect.
+	upstreamAddr := getenv("UPSTREAM_ADDR", "http://localhost:9000")
+	upstreamURL, err := url.Parse(upstreamAddr)
+	if err != nil {
+		log.Fatalf("bad UPSTREAM_ADDR %q: %v", upstreamAddr, err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+
 	tenants := map[string]tenant{
 		"free-key": {name: "free", limiter: limiter.NewTokenBucket(rdb, 5, 1)},
 		"pro-key":  {name: "pro", limiter: limiter.NewTokenBucket(rdb, 100, 20)},
@@ -66,8 +76,8 @@ func main() {
 			return
 		}
 
-		w.WriteHeader(http.StatusOK) // 200
-		w.Write([]byte("ok\n"))
+		// allowed: forward the request to the real upstream
+		proxy.ServeHTTP(w, r)
 	}
 
 	http.HandleFunc("/", handler)
