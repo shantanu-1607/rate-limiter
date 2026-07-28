@@ -27,12 +27,26 @@ func getenv(key, def string) string {
 	return def
 }
 
+// newLimiter builds the limiter backend named by mode.
+func newLimiter(mode string, rdb *redis.Client, capacity, rate float64) limiter.Limiter {
+	switch mode {
+	case "lua":
+		return limiter.NewTokenBucket(rdb, capacity, rate)
+	case "memory":
+		return limiter.NewMemoryLimiter(capacity, rate)
+	default:
+		log.Fatalf("unknown LIMITER_MODE %q (want: lua, memory)", mode)
+		return nil
+	}
+}
+
 func main() {
 	ctx := context.Background()
 
 	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
 	port := getenv("PORT", "8080")
 	instance := getenv("INSTANCE_ID", "limiter-1")
+	mode := getenv("LIMITER_MODE", "lua")
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -48,8 +62,8 @@ func main() {
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
 
 	tenants := map[string]tenant{
-		"free-key": {name: "free", limiter: limiter.NewTokenBucket(rdb, 5, 1)},
-		"pro-key":  {name: "pro", limiter: limiter.NewTokenBucket(rdb, 100, 20)},
+		"free-key": {name: "free", limiter: newLimiter(mode, rdb, 5, 1)},
+		"pro-key":  {name: "pro", limiter: newLimiter(mode, rdb, 100, 20)},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +95,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", handler)
-	log.Printf("[%s] listening on :%s (redis %s)", instance, port, redisAddr)
+	log.Printf("[%s] listening on :%s (mode=%s, redis=%s)", instance, port, mode, redisAddr)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
