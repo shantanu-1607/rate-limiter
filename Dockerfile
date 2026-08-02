@@ -16,3 +16,6 @@ WORKDIR /root/
 COPY --from=builder /rate-limiter /bin/limiter
 COPY --from=builder /bin/upstream
 /bin/upstream
+COPY --from=builder /app/internal/limiter/scripts /root/internal/limiter/scripts
+EXPOSE 8080 9000
+CMD ["/bin/limiter"]
