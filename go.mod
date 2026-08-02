@@ -1,6 +1,6 @@
 module github.com/shantanusingh/distributed-rate-limiter
 
-go 1.26.4
+go 1.24
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
