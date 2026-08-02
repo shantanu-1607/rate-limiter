@@ -7,15 +7,14 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /rate-limiter ./cmd/limiter/main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -tags musl -o /rate-limiter ./cmd/limiter/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/limiter ./cmd/limiter
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/upstream ./cmd/upstream
 
 FROM alpine:3.19
 
 WORKDIR /root/
-COPY --from=builder /rate-limiter /bin/limiter
-COPY --from=builder /bin/upstream
-/bin/upstream
-COPY --from=builder /app/internal/limiter/scripts /root/internal/limiter/scripts
+COPY --from=builder /bin/limiter /bin/limiter
+COPY --from=builder /bin/upstream /bin/upstream
+
 EXPOSE 8080 9000
 CMD ["/bin/limiter"]
