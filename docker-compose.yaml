@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rl-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no
+
+  upstream:
+    build: .
+    container_name: rl-upstream
+    command: /bin/upstream
+    environment:
+      - PORT=9000
+    ports:
+      - "9000:9000"
+
+  app-1:
+    build: .
+    container_name: rl-app-1
+    command: /bin/limiter
+    environment:
+      - PORT=8080
+      - REDIS_ADDR=redis:6379
+      - UPSTREAM_ADDR=http://upstream:9000
+      - LIMITER_MODE=lua
+      - INSTANCE_ID=app-1
+    depends_on:
+      - redis
+      - upstream
+
+  app-2:
+    build: .
+    container_name: rl-app-2
+    command: /bin/limiter
+    environment:
+      - PORT=8080
+      - REDIS_ADDR=redis:6379
+      - UPSTREAM_ADDR=http://upstream:9000
+      - LIMITER_MODE=lua
+      - INSTANCE_ID=app-2
+    depends_on:
+      - redis
+      - upstream
+
+  app-3:
+    build: .
+    container_name: rl-app-3
+    command: /bin/limiter
+    environment:
+      - PORT=8080
+      - REDIS_ADDR=redis:6379
+      - UPSTREAM_ADDR=http://upstream:9000
+      - LIMITER_MODE=lua
+      - INSTANCE_ID=app-3
+    depends_on:
+      - redis
+      - upstream
+
+  nginx:
+    image: nginx:alpine
+    container_name: rl-nginx
+    ports:
+      - "8000:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app-1
+      - app-2
+      - app-3
