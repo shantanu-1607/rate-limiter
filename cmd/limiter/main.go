@@ -32,10 +32,12 @@ func newLimiter(mode string, rdb *redis.Client, capacity, rate float64) limiter.
 	switch mode {
 	case "lua":
 		return limiter.NewTokenBucket(rdb, capacity, rate)
+	case "sliding":
+		return limiter.NewSlidingWindowLog(rdb, capacity, rate)
 	case "memory":
 		return limiter.NewMemoryLimiter(capacity, rate)
 	default:
-		log.Fatalf("unknown LIMITER_MODE %q (want: lua, memory)", mode)
+		log.Fatalf("unknown LIMITER_MODE %q (want: lua, sliding, memory)", mode)
 		return nil
 	}
 }
@@ -62,8 +64,14 @@ func main() {
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
 
 	tenants := map[string]tenant{
-		"free-key": {name: "free", limiter: newLimiter(mode, rdb, 5, 1)},
-		"pro-key":  {name: "pro", limiter: newLimiter(mode, rdb, 100, 20)},
+		// Tenant 1: Token Bucket algorithm (5 capacity, 1/s refill rate)
+		"free-key": {name: "free", limiter: newLimiter("lua", rdb, 5, 1)},
+
+		// Tenant 2: Sliding Window Log algorithm (10 max requests per 10s window)
+		"pro-key": {name: "pro", limiter: newLimiter("sliding", rdb, 10, 10)},
+
+		// Tenant 3: Sliding Window Log algorithm (5 max requests per 5s window)
+		"sliding-key": {name: "sliding", limiter: newLimiter("sliding", rdb, 5, 5)},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
