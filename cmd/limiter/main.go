@@ -64,6 +64,14 @@ func main() {
 	tenants := map[string]tenant{
 		"free-key": {name: "free", limiter: newLimiter(mode, rdb, 5, 1)},
 		"pro-key":  {name: "pro", limiter: newLimiter(mode, rdb, 100, 20)},
+
+		// Tenant 3: High-throughput sharded tenant (100 total capacity, 100/s total refill, spread across 10 shards)
+		"enterprise-key": {
+			name: "enterprise",
+			limiter: limiter.NewShardedLimiter(10, func() limiter.Limiter {
+				return limiter.NewTokenBucket(rdb, 10, 10)
+			}),
+		},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
