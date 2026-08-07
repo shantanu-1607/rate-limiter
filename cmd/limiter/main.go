@@ -72,6 +72,14 @@ func main() {
 
 		// Tenant 3: Sliding Window Log algorithm (5 max requests per 5s window)
 		"sliding-key": {name: "sliding", limiter: newLimiter("sliding", rdb, 5, 5)},
+
+		// Tenant 4: High-throughput sharded tenant (100 total capacity, 100/s total refill, spread across 10 shards)
+		"enterprise-key": {
+			name: "enterprise",
+			limiter: limiter.NewShardedLimiter(10, func() limiter.Limiter {
+				return limiter.NewTokenBucket(rdb, 10, 10)
+			}),
+		},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
